@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
@@ -13,6 +12,7 @@ import ProposalsList from "../components/admin/ProposalsList";
 import DeleteConfirmDialog from "../components/admin/DeleteConfirmDialog";
 import AssignProjectDialog from "../components/admin/AssignProjectDialog";
 import ProjectApprovalDialog from "../components/admin/ProjectApprovalDialog";
+import MpesaSettingsButton from "../components/MpesaSettingsButton";
 import { useAdminData } from "@/hooks/useAdminData";
 
 const AdminDashboard = () => {
@@ -129,10 +129,17 @@ const AdminDashboard = () => {
       <Navbar />
       
       <div className="container mx-auto px-4 py-12 mt-16">
-        <h1 className="text-3xl font-bold mb-2">Admin Dashboard</h1>
-        <p className="text-muted-foreground mb-8">
-          Manage users, projects and system settings
-        </p>
+        <div className="flex justify-between items-start mb-8">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Admin Dashboard</h1>
+            <p className="text-muted-foreground">
+              Manage users, projects and system settings
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <MpesaSettingsButton />
+          </div>
+        </div>
         
         <AdminStats 
           totalUsers={users.length} 

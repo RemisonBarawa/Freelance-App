@@ -1,13 +1,14 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Settings, Eye, EyeOff, Save, AlertCircle } from "lucide-react";
+import { Settings, Eye, EyeOff, Save, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { supabase } from "@/integrations/supabase/client";
 
 interface MpesaSecrets {
   MPESA_CONSUMER_KEY: string;
@@ -36,6 +37,7 @@ export default function MpesaSecretsDialog() {
   });
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const secretDescriptions = {
     MPESA_CONSUMER_KEY: "Consumer Key from Safaricom Developer Portal",
@@ -47,6 +49,41 @@ export default function MpesaSecretsDialog() {
     MPESA_SECURITY_CREDENTIAL: "Security credential for B2C transactions",
     MPESA_QUEUE_TIMEOUT_URL: "Queue timeout URL for B2C transactions",
     MPESA_RESULT_URL: "Result URL for B2C transactions"
+  };
+
+  // Load existing secrets when dialog opens
+  useEffect(() => {
+    if (open) {
+      loadExistingSecrets();
+    }
+  }, [open]);
+
+  const loadExistingSecrets = async () => {
+    setIsLoading(true);
+    try {
+      // Call a function to get current secret values (masked)
+      const { data, error } = await supabase.functions.invoke('get-mpesa-secrets', {
+        body: { action: 'get_masked_values' }
+      });
+
+      if (error) {
+        console.error('Error loading secrets:', error);
+        toast.error("Could not load existing secrets");
+        return;
+      }
+
+      if (data?.secrets) {
+        setSecrets(prevSecrets => ({
+          ...prevSecrets,
+          ...data.secrets
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading secrets:', error);
+      toast.error("Could not load existing secrets");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleInputChange = (key: keyof MpesaSecrets, value: string) => {
@@ -85,15 +122,24 @@ export default function MpesaSecretsDialog() {
         MPESA_RESULT_URL: secrets.MPESA_RESULT_URL || `${baseUrl}/mpesa-b2c-result`
       };
 
-      // In a real implementation, you would update these through Supabase's secrets API
-      // For now, we'll show a success message
-      console.log('M-Pesa secrets to update:', updatedSecrets);
-      
-      toast.success("M-Pesa secrets updated successfully!");
-      setOpen(false);
-    } catch (error) {
+      // Update secrets through edge function
+      const { data, error } = await supabase.functions.invoke('update-mpesa-secrets', {
+        body: { secrets: updatedSecrets }
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Failed to update secrets');
+      }
+
+      if (data?.success) {
+        toast.success("M-Pesa secrets updated successfully!");
+        setOpen(false);
+      } else {
+        throw new Error(data?.error || 'Failed to update secrets');
+      }
+    } catch (error: any) {
       console.error('Error updating M-Pesa secrets:', error);
-      toast.error("Failed to update M-Pesa secrets");
+      toast.error(`Failed to update M-Pesa secrets: ${error.message}`);
     } finally {
       setIsUpdating(false);
     }
@@ -133,51 +179,58 @@ export default function MpesaSecretsDialog() {
             </AlertDescription>
           </Alert>
 
-          <div className="grid gap-4">
-            {Object.entries(secrets).map(([key, value]) => (
-              <Card key={key}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-medium">
-                      {key.replace(/MPESA_/, '').replace(/_/g, ' ')}
-                      {['MPESA_CONSUMER_KEY', 'MPESA_CONSUMER_SECRET', 'MPESA_PASSKEY', 'MPESA_SHORTCODE'].includes(key) && (
-                        <span className="text-red-500 ml-1">*</span>
-                      )}
-                    </CardTitle>
-                    {key.includes('SECRET') || key.includes('KEY') || key.includes('CREDENTIAL') ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => toggleSecretVisibility(key)}
-                      >
-                        {showSecrets[key] ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
+          {isLoading ? (
+            <div className="flex items-center justify-center p-8">
+              <Loader2 className="h-8 w-8 animate-spin" />
+              <span className="ml-2">Loading existing configuration...</span>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {Object.entries(secrets).map(([key, value]) => (
+                <Card key={key}>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-medium">
+                        {key.replace(/MPESA_/, '').replace(/_/g, ' ')}
+                        {['MPESA_CONSUMER_KEY', 'MPESA_CONSUMER_SECRET', 'MPESA_PASSKEY', 'MPESA_SHORTCODE'].includes(key) && (
+                          <span className="text-red-500 ml-1">*</span>
                         )}
-                      </Button>
-                    ) : null}
-                  </div>
-                  <CardDescription className="text-xs">
-                    {secretDescriptions[key as keyof typeof secretDescriptions]}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <Input
-                    type={
-                      (key.includes('SECRET') || key.includes('KEY') || key.includes('CREDENTIAL')) && !showSecrets[key]
-                        ? 'password'
-                        : 'text'
-                    }
-                    value={value}
-                    onChange={(e) => handleInputChange(key as keyof MpesaSecrets, e.target.value)}
-                    placeholder={`Enter ${key.replace(/MPESA_/, '').replace(/_/g, ' ').toLowerCase()}`}
-                  />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                      </CardTitle>
+                      {key.includes('SECRET') || key.includes('KEY') || key.includes('CREDENTIAL') ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => toggleSecretVisibility(key)}
+                        >
+                          {showSecrets[key] ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </Button>
+                      ) : null}
+                    </div>
+                    <CardDescription className="text-xs">
+                      {secretDescriptions[key as keyof typeof secretDescriptions]}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <Input
+                      type={
+                        (key.includes('SECRET') || key.includes('KEY') || key.includes('CREDENTIAL')) && !showSecrets[key]
+                          ? 'password'
+                          : 'text'
+                      }
+                      value={value}
+                      onChange={(e) => handleInputChange(key as keyof MpesaSecrets, e.target.value)}
+                      placeholder={`Enter ${key.replace(/MPESA_/, '').replace(/_/g, ' ').toLowerCase()}`}
+                    />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
 
           <div className="flex gap-2">
             <Button
@@ -190,12 +243,12 @@ export default function MpesaSecretsDialog() {
             </Button>
             <Button
               onClick={handleUpdate}
-              disabled={isUpdating}
+              disabled={isUpdating || isLoading}
               className="flex-1 gap-2"
             >
               {isUpdating ? (
                 <>
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Updating...
                 </>
               ) : (
